@@ -252,63 +252,60 @@ ax2.grid(True)
 plt.tight_layout()
 plt.show()
 
-#oppgave 7
+# Oppgave 7: Tilpass koden til et vilkårlig nettverk/mesh
 
-def plot_mesh(xy, edges, title="Mesh"):
-    fig, ax = plt.subplots()
-    for edge in edges:
-        ax.plot(xy[edge, 0], xy[edge, 1], 'k-', lw=0.5)
-    ax.scatter(xy[:, 0], xy[:, 1], s=10, color='red')
-    ax.set_aspect("equal")
-    ax.set_title(title)
-    plt.show()
+# Dimensjoner og antall masser for det store systemet
+N    = 100
+lx0  = 0.2   # m
+ly0  = 0.1   # m
 
-xy0, Edges = read_mesh(lx0, ly0, N)
-ell0_      = np.linalg.norm(xy0[Edges[:, 0]] - xy0[Edges[:, 1]], axis=1)
-plot_mesh(xy0, Edges, title="Udeformert mesh")
+xy0, edges = read_mesh(lx0, ly0, N)
+ell0       = np.linalg.norm(xy0[edges[:, 0]] - xy0[edges[:, 1]], axis=1)
 
 ids_left   = xy0[:, 0] < 1e-10
 ids_right  = xy0[:, 0] > lx0 - 1e-10
 ids_bottom = xy0[:, 1] < 1e-10
 ids_top    = xy0[:, 1] > ly0 - 1e-10
 
-# --- Fjærenergier (vektorisert) ---
-def spring_energy(xy, edges, k, ell0_):
+plot_mesh(xy0, edges)
+
+# --- Vektoriserte energi- og kraftfunksjoner (raskere for stort N) ---
+def spring_energy(xy, edges, k, ell0):
     dr  = xy[edges[:, 1]] - xy[edges[:, 0]]
     ell = np.linalg.norm(dr, axis=1)
-    return 0.5 * k * np.sum((ell - ell0_)**2)
+    return 0.5 * k * np.sum((ell - ell0)**2)
 
-def spring_forces(xy, edges, k, ell0_):
+def spring_forces(xy, edges, k, ell0):
     forces = np.zeros_like(xy)
     dr     = xy[edges[:, 1]] - xy[edges[:, 0]]
     ell    = np.linalg.norm(dr, axis=1, keepdims=True)
-    f_vec  = k * (ell - ell0_[:, None]) * (dr / ell)
+    f_vec  = k * (ell - ell0[:, None]) * (dr / ell)
     np.add.at(forces, edges[:, 0],  f_vec)
     np.add.at(forces, edges[:, 1], -f_vec)
     return forces
 
-def spring_strains(xy, edges, ell0_):
+def spring_strains(xy, edges, ell0):
     dr  = xy[edges[:, 1]] - xy[edges[:, 0]]
     ell = np.linalg.norm(dr, axis=1)
-    return (ell - ell0_) / ell0_
+    return (ell - ell0) / ell0
 
-# --- Total energi og jakobisk ---
-def total_energy(xy_flat, edges, k, K, ell0_, Lx_plate):
+# --- Total energi og jakobisk (uendret struktur fra oppgave 4 og 5) ---
+def total_energy(xy_flat, edges, k, K, ell0, lx_plate):
     xy     = xy_flat.reshape((-1, 2))
-    energy = spring_energy(xy, edges, k, ell0_)
+    energy = spring_energy(xy, edges, k, ell0)
     energy += 0.5 * K * (xy[ids_left,  0]**2).sum()
-    energy += 0.5 * K * ((xy[ids_right, 0] - Lx_plate)**2).sum()
+    energy += 0.5 * K * ((xy[ids_right, 0] - lx_plate)**2).sum()
     energy += 0.5 * K * (xy[ids_left,  1] - xy0[ids_left,  1]).mean()**2
     energy += 0.5 * K * (xy[ids_right, 1] - xy0[ids_right, 1]).mean()**2
     return energy
 
-def total_energy_jacobian(xy_flat, edges, k, K, ell0_, Lx_plate):
+def total_energy_jacobian(xy_flat, edges, k, K, ell0, lx_plate):
     xy   = xy_flat.reshape((-1, 2))
-    grad = -spring_forces(xy, edges, k, ell0_)
+    grad = -spring_forces(xy, edges, k, ell0)
     grad[ids_left,  0] += K * xy[ids_left, 0]
-    grad[ids_right, 0] += K * (xy[ids_right, 0] - Lx_plate)
-    grad[ids_left,  1] += K * (xy[ids_left,  1] - XY0[ids_left,  1]).mean()
-    grad[ids_right, 1] += K * (xy[ids_right, 1] - XY0[ids_right, 1]).mean()
+    grad[ids_right, 0] += K * (xy[ids_right, 0] - lx_plate)
+    grad[ids_left,  1] += K * (xy[ids_left,  1] - xy0[ids_left,  1]).mean()
+    grad[ids_right, 1] += K * (xy[ids_right, 1] - xy0[ids_right, 1]).mean()
     return grad.flatten()
 
 MINIMIZE_KWARGS = dict(
@@ -319,8 +316,8 @@ MINIMIZE_KWARGS = dict(
 )
 
 # --- Visualisering av deformert mesh med strekk/kompresjon ---
-def plot_deformed(xy, edges, ell0_, title="Deformert mesh"):
-    strains = spring_strains(xy, edges, ell0_)
+def plot_deformed(xy, edges, ell0, title="Deformert mesh"):
+    strains = spring_strains(xy, edges, ell0)
     vmax    = np.max(np.abs(strains))
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -337,55 +334,55 @@ def plot_deformed(xy, edges, ell0_, title="Deformert mesh"):
     plt.tight_layout()
     plt.show()
 
-# --- Plott ved ulike tøyninger ---
+# --- Plott deformert mesh ved ulike strekkfaktorer ---
 f_plot = [0.01, 0.05, 0.1, 0.3]
-xy = xy0.copy()
 
 for f in f_plot:
-    lx_target = Lx0 * (1 + f)
-    res = minimize(total_energy, xy.flatten(),
-                   args=(Edges, k, K, ell0_, lx_target), **MINIMIZE_KWARGS)
+    lx_plate = lx0 * (1 + f)
+    res = minimize(total_energy, xy0.flatten(),
+                   args=(edges, k, K, ell0, lx_plate), **MINIMIZE_KWARGS)
     xy = res.x.reshape((-1, 2))
-    plot_deformed(xy, Edges, ell0_, title=f"Deformert mesh, f={f:.2f}  (L={lx_target:.4f} m)")
+    plot_deformed(xy, edges, ell0, title=f"Deformert mesh, f={f:.2f}")
 
-# --- E og ν over spekter av tøyninger ---
-f_values = np.logspace(-3, 0, 30)
-res_list = []
-xy = xy0.copy()
+# --- Mål E og ν over spekter av tøyninger ---
+f_values  = np.logspace(-3, 0, 30)
+eps_n_list, E_list, nu_list = [], [], []
 
 for f in f_values:
-    lx_target = lx0 * (1 + f)
-    res = minimize(total_energy, XY.flatten(),
-                   args=(Edges, k, K, ell0_, lx_target), **MINIMIZE_KWARGS)
-    XY = res.x.reshape((-1, 2))
+    lx_plate = lx0 * (1 + f)
+    res = minimize(total_energy, xy0.flatten(),
+                   args=(edges, k, K, ell0, lx_plate), **MINIMIZE_KWARGS)
+    xy = res.x.reshape((-1, 2))
 
-    lx = xy[ids_right, 0].mean() - xy[ids_left,   0].mean()
-    ly = xy[ids_top,   1].mean() - xy[ids_bottom,  1].mean()
-    en = (lx - lx0) / lx0
-    et = (ly - ly0) / ly0
-    sn = -K * (XY[ids_right, 0] - lx_target).sum() / (ly0 * B)
-    res_list.append([en, sn / en, -et / en])
+    lx    = xy[ids_right, 0].mean() - xy[ids_left,   0].mean()
+    ly    = xy[ids_top,   1].mean() - xy[ids_bottom,  1].mean()
+    eps_n = (lx - lx0) / lx0
+    eps_t = (ly - ly0) / ly0
+    sigma = -K * (xy[ids_right, 0] - lx_plate).sum() / (ly0 * B)
 
-en_arr, E_arr, nu_arr = np.array(res_list).T
+    eps_n_list.append(eps_n)
+    E_list.append(sigma / eps_n)
+    nu_list.append(-eps_t / eps_n)
 
-# --- Plotting E og ν ---
-fig, axes = plt.subplots(1, 2, figsize=(11, 4))
-for ax, data, theory, title, ylabel in zip(
-    axes,
-    [E_arr,    nu_arr],
-    [E_theory, nu_theory],
-    [f'Youngs modul (Teori: {E_theory:.2f})', f'Poissons tall (Teori: {nu_theory:.3f})'],
-    ['E [N/m²]', 'ν']
-):
-    ax.semilogx(en_arr, data, 'o-', label='Simulert')
-    ax.axhline(theory, color='r', ls='--', label=f'Teori ({theory:.3f})')
-    ax.set(xlabel='εn', ylabel=ylabel, title=title)
-    ax.grid(True)
-    ax.legend()
+eps_n_arr = np.array(eps_n_list)
+E_arr     = np.array(E_list)
+nu_arr    = np.array(nu_list)
+
+# --- Plot E og ν ---
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+
+ax1.semilogx(eps_n_arr, E_arr, 'o-', label='Simulert')
+ax1.set(xlabel='$\\varepsilon_n$', ylabel='E [N/m²]', title='Youngs modul')
+ax1.grid(True)
+ax1.legend()
+
+ax2.semilogx(eps_n_arr, nu_arr, 'o-', label='Simulert')
+ax2.set(xlabel='$\\varepsilon_n$', ylabel='$\\nu$', title='Poissons tall')
+ax2.grid(True)
+ax2.legend()
 
 plt.tight_layout()
 plt.show()
 
-print(f"Resultater ved minste εn:")
-print(f"  E = {E_arr[0]:.4f}  (teori: {E_theory:.4f})")
-print(f"  ν = {nu_arr[0]:.4f}  (teori: {nu_theory:.4f})")
+print(f"E ved minste εn:  {E_arr[0]:.4f} N/m²")
+print(f"ν ved minste εn:  {nu_arr[0]:.4f}")
